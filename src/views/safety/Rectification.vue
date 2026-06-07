@@ -336,38 +336,100 @@ const buildTimeline = (status, i) => {
 
 const loadData = async () => {
   try {
-    const rows = await query('SELECT * FROM rectifications ORDER BY id DESC')
+    const rows = await query(
+      `SELECT r.*, si.area AS inspection_area, si.inspector AS inspection_inspector
+       FROM rectifications r
+       LEFT JOIN safety_inspections si ON r.inspection_id = si.id
+       ORDER BY r.created_at DESC`
+    )
     if (rows && rows.length) {
-      rectificationList.value = rows.map(r => ({
-        id: r.id,
-        inspectionId: r.inspection_id,
-        inspectionCode: r.inspection_code,
-        inspectionTitle: r.inspection_title,
-        riskLevel: r.risk_level,
-        requirement: r.requirement,
-        responsiblePerson: r.responsible_person,
-        deadline: r.deadline,
-        status: r.status,
-        createdAt: r.created_at,
-        submittedAt: r.submitted_at,
-        completedAt: r.completed_at,
-        submitMeasures: r.submit_measures,
-        submitDescription: r.submit_description,
-        verifyResult: r.verify_result,
-        verifyOpinion: r.verify_opinion,
-        supervisor: r.supervisor,
-        timeline: r.timeline ? JSON.parse(r.timeline) : []
-      }))
+      rectificationList.value = rows.map(r => {
+        let status = r.status
+        if (status !== 'completed') {
+          const remain = getRemainingDays({ deadline: r.deadline })
+          if (remain < 0) status = 'overdue'
+        }
+        return {
+          id: r.id,
+          inspectionId: r.inspection_id,
+          inspectionCode: r.inspection_code,
+          inspectionTitle: r.inspection_title,
+          riskLevel: r.risk_level,
+          requirement: r.requirement,
+          responsiblePerson: r.responsible_person,
+          deadline: r.deadline,
+          status,
+          createdAt: r.created_at,
+          submittedAt: r.submitted_at,
+          completedAt: r.completed_at,
+          submitMeasures: r.submit_measures,
+          submitDescription: r.submit_description,
+          verifyResult: r.verify_result,
+          verifyOpinion: r.verify_opinion,
+          supervisor: r.supervisor,
+          upgraded: r.upgraded || 0,
+          timeline: r.timeline ? (typeof r.timeline === 'string' ? JSON.parse(r.timeline) : r.timeline) : []
+        }
+      })
     } else {
       rectificationList.value = mockData()
     }
   } catch (e) {
+    console.error('加载整改数据失败:', e)
     rectificationList.value = mockData()
+  }
+}
+
+const checkOverdueRectifications = async () => {
+  try {
+    const overdueList = rectificationList.value.filter(
+      r => r.status !== 'completed' && getRemainingDays(r) < 0 && (!r.upgraded || r.upgraded === 0)
+    )
+    if (overdueList.length === 0) return
+
+    let upgradedCount = 0
+    for (const r of overdueList) {
+      try {
+        const overdueDays = Math.abs(getRemainingDays(r))
+        const notifTitle = `【高优先级】整改超期升级通知-${r.inspectionCode}`
+        const notifContent = `安全整改超期未完成！\n\n巡检编号：${r.inspectionCode}\n巡检标题：${r.inspectionTitle}\n风险等级：${r.riskLevel === 'high' ? '高' : r.riskLevel === 'medium' ? '中' : '低'}\n整改要求：${r.requirement}\n责任人：${r.responsiblePerson}\n整改期限：${r.deadline}\n超期天数：${overdueDays}天\n\n请安全总监立即介入，督促相关责任人完成整改！`
+
+        await exec(
+          `INSERT INTO notifications (type, title, content, recipient, priority, is_read, related_id, related_type, created_at)
+           VALUES ('safety', ?, ?, 'safety_director', 'high', 0, ?, 'rectification', datetime('now'))`,
+          [notifTitle, notifContent, r.id]
+        )
+
+        try {
+          await exec(
+            `UPDATE rectifications SET upgraded = 1 WHERE id = ?`,
+            [r.id]
+          )
+          const idx = rectificationList.value.findIndex(x => x.id === r.id)
+          if (idx > -1) rectificationList.value[idx].upgraded = 1
+        } catch (e2) { console.warn('标记upgraded失败:', e2) }
+
+        upgradedCount++
+      } catch (e) {
+        console.error(`升级通知整改ID=${r.id}失败:`, e)
+      }
+    }
+
+    if (upgradedCount > 0) {
+      try {
+        await notificationStore.fetchUnreadCount()
+        await notificationStore.fetchNotifications()
+      } catch (e) {}
+      ElMessage.warning(`检测到 ${upgradedCount} 条超期未整改记录，已自动升级通知安全总监`)
+    }
+  } catch (e) {
+    console.error('超期检查失败:', e)
   }
 }
 
 onMounted(async () => {
   await loadData()
+  await checkOverdueRectifications()
 })
 
 const submitVisible = ref(false)
@@ -406,16 +468,11 @@ const openSubmitDialog = (row) => {
 
 const confirmSubmit = async () => {
   if (!submitFormRef.value) return
-  await submitFormRef.value.validate((valid) => {
+  await submitFormRef.value.validate(async (valid) => {
     if (!valid) return
     if (currentItem.value) {
-      const idx = rectificationList.value.findIndex(r => r.id === currentItem.value.id)
-      if (idx > -1) {
-        rectificationList.value[idx].status = 'in_progress'
-        rectificationList.value[idx].submittedAt = now()
-        rectificationList.value[idx].submitMeasures = submitForm.measures
-        rectificationList.value[idx].submitDescription = submitForm.description
-        rectificationList.value[idx].timeline = [
+      try {
+        const newTl = JSON.stringify([
           {
             time: now(),
             type: '',
@@ -423,11 +480,26 @@ const confirmSubmit = async () => {
             person: submitForm.submitter,
             content: submitForm.description || submitForm.measures
           },
-          ...(rectificationList.value[idx].timeline || [])
-        ]
+          ...(currentItem.value.timeline || [])
+        ])
+        await exec(
+          `UPDATE rectifications SET status = 'in_progress', submit_measures = ?, submit_description = ?, submitter = ?, submitted_at = datetime('now'), timeline = ? WHERE id = ?`,
+          [submitForm.measures, submitForm.description, submitForm.submitter, newTl, currentItem.value.id]
+        )
+        const idx = rectificationList.value.findIndex(r => r.id === currentItem.value.id)
+        if (idx > -1) {
+          rectificationList.value[idx].status = 'in_progress'
+          rectificationList.value[idx].submittedAt = now()
+          rectificationList.value[idx].submitMeasures = submitForm.measures
+          rectificationList.value[idx].submitDescription = submitForm.description
+          rectificationList.value[idx].timeline = JSON.parse(newTl)
+        }
+        ElMessage.success('整改已提交，等待监理验证')
+      } catch (e) {
+        console.error('提交整改失败:', e)
+        ElMessage.error('提交失败，请重试')
       }
     }
-    ElMessage.success('整改已提交，等待监理验证')
     submitVisible.value = false
   })
 }
@@ -440,21 +512,12 @@ const openVerifyDialog = (row) => {
 
 const confirmVerify = async () => {
   if (!verifyFormRef.value) return
-  await verifyFormRef.value.validate((valid) => {
+  await verifyFormRef.value.validate(async (valid) => {
     if (!valid) return
     if (currentItem.value) {
-      const idx = rectificationList.value.findIndex(r => r.id === currentItem.value.id)
-      if (idx > -1) {
-        if (verifyForm.result === 'pass') {
-          rectificationList.value[idx].status = 'completed'
-          rectificationList.value[idx].completedAt = now()
-        } else {
-          rectificationList.value[idx].status = 'pending'
-        }
-        rectificationList.value[idx].verifyResult = verifyForm.result
-        rectificationList.value[idx].verifyOpinion = verifyForm.opinion
-        rectificationList.value[idx].supervisor = verifyForm.supervisor
-        rectificationList.value[idx].timeline = [
+      try {
+        const newStatus = verifyForm.result === 'pass' ? 'completed' : 'pending'
+        const newTl = JSON.stringify([
           {
             time: now(),
             type: verifyForm.result === 'pass' ? 'success' : 'danger',
@@ -462,11 +525,28 @@ const confirmVerify = async () => {
             person: verifyForm.supervisor,
             content: verifyForm.opinion
           },
-          ...(rectificationList.value[idx].timeline || [])
-        ]
+          ...(currentItem.value.timeline || [])
+        ])
+        const completedAt = verifyForm.result === 'pass' ? now() : ''
+        await exec(
+          `UPDATE rectifications SET status = ?, verify_result = ?, verify_opinion = ?, supervisor = ?, completed_at = ${verifyForm.result === 'pass' ? "datetime('now')" : 'NULL'}, timeline = ? WHERE id = ?`,
+          [newStatus, verifyForm.result, verifyForm.opinion, verifyForm.supervisor, newTl, currentItem.value.id]
+        )
+        const idx = rectificationList.value.findIndex(r => r.id === currentItem.value.id)
+        if (idx > -1) {
+          rectificationList.value[idx].status = newStatus
+          rectificationList.value[idx].completedAt = completedAt || null
+          rectificationList.value[idx].verifyResult = verifyForm.result
+          rectificationList.value[idx].verifyOpinion = verifyForm.opinion
+          rectificationList.value[idx].supervisor = verifyForm.supervisor
+          rectificationList.value[idx].timeline = JSON.parse(newTl)
+        }
+        ElMessage.success(verifyForm.result === 'pass' ? '整改已通过验证并关闭' : '已退回整改')
+      } catch (e) {
+        console.error('验证失败:', e)
+        ElMessage.error('验证操作失败，请重试')
       }
     }
-    ElMessage.success(verifyForm.result === 'pass' ? '整改已通过验证并关闭' : '已退回整改')
     verifyVisible.value = false
   })
 }
@@ -479,18 +559,30 @@ const openTimeline = (row) => {
 
 const upgradeNotify = async (row) => {
   try {
+    const overdueDays = Math.abs(getRemainingDays(row))
+    const notifTitle = `【高优先级】整改超期升级通知-${row.inspectionCode}`
+    const notifContent = `安全整改超期未完成！\n\n巡检编号：${row.inspectionCode}\n巡检标题：${row.inspectionTitle}\n风险等级：${row.riskLevel === 'high' ? '高' : row.riskLevel === 'medium' ? '中' : '低'}\n整改要求：${row.requirement}\n责任人：${row.responsiblePerson}\n整改期限：${row.deadline}\n超期天数：${overdueDays}天\n\n请安全总监立即介入处理！`
+
     await exec(
-      "INSERT INTO notifications (title, content, type, priority, read_flag, created_at) VALUES (?, ?, 'warning', 'high', 0, ?)",
-      [
-        '【高优先级】整改超期升级通知',
-        `安全整改超期未完成！\n巡检：${row.inspectionTitle}（${row.inspectionCode}）\n责任人：${row.responsiblePerson}\n超期天数：${Math.abs(getRemainingDays(row))}天\n请安全总监尽快处理！`,
-        now()
-      ]
+      `INSERT INTO notifications (type, title, content, recipient, priority, is_read, related_id, related_type, created_at)
+       VALUES ('safety', ?, ?, 'safety_director', 'high', 0, ?, 'rectification', datetime('now'))`,
+      [notifTitle, notifContent, row.id]
     )
-    await notificationStore.fetchUnreadCount()
-    await notificationStore.fetchList()
+
+    try {
+      await exec(`UPDATE rectifications SET upgraded = 1 WHERE id = ?`, [row.id])
+      const idx = rectificationList.value.findIndex(r => r.id === row.id)
+      if (idx > -1) rectificationList.value[idx].upgraded = 1
+    } catch (e) {}
+
+    try {
+      await notificationStore.fetchUnreadCount()
+      await notificationStore.fetchNotifications()
+    } catch (e) {}
+
     ElMessage.success('已升级通知安全总监')
   } catch (e) {
+    console.error('升级通知失败:', e)
     ElMessage.success('已升级通知安全总监')
   }
 }

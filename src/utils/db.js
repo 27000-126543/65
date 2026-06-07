@@ -147,7 +147,45 @@ function initMockDb() {
       { id: 5, project_id: 1, section: 'B区', year: 2026, month: 6, completed_value: 12000000, planned_value: 38000000, actual_cost: 11800000, quality_pass_rate: 97.0, safety_incidents: 0 },
       { id: 6, project_id: 2, section: '东标段', year: 2026, month: 5, completed_value: 22000000, planned_value: 25000000, actual_cost: 21500000, quality_pass_rate: 98.5, safety_incidents: 0 },
       { id: 7, project_id: 2, section: '西标段', year: 2026, month: 5, completed_value: 15000000, planned_value: 18000000, actual_cost: 14800000, quality_pass_rate: 97.2, safety_incidents: 1 }
-    ]
+    ],
+    construction_tasks: [
+      { id: 1, project_id: 1, name: '土方开挖', section: 'A区', duration: 20, start_date: '2026-03-01', end_date: '2026-03-20', predecessors: '[]', resources: '', early_start: 0, early_finish: 20, late_start: 0, late_finish: 20, total_float: 0, free_float: 0, is_critical: 1, progress: 100, status: 'completed' },
+      { id: 2, project_id: 1, name: '基础垫层', section: 'A区', duration: 5, start_date: '2026-03-21', end_date: '2026-03-25', predecessors: '[1]', resources: '', early_start: 20, early_finish: 25, late_start: 20, late_finish: 25, total_float: 0, free_float: 0, is_critical: 1, progress: 100, status: 'completed' },
+      { id: 3, project_id: 1, name: '地下结构施工', section: 'A区', duration: 60, start_date: '2026-03-26', end_date: '2026-05-24', predecessors: '[2]', resources: '', early_start: 25, early_finish: 85, late_start: 25, late_finish: 85, total_float: 0, free_float: 0, is_critical: 1, progress: 85, status: 'in_progress' },
+      { id: 4, project_id: 1, name: '裙楼主体结构', section: 'B区', duration: 90, start_date: '2026-05-25', end_date: '2026-08-22', predecessors: '[3]', resources: '', early_start: 85, early_finish: 175, late_start: 90, late_finish: 180, total_float: 5, free_float: 5, is_critical: 0, progress: 40, status: 'in_progress' },
+      { id: 5, project_id: 1, name: '主楼主体结构', section: 'A区', duration: 180, start_date: '2026-05-25', end_date: '2026-11-20', predecessors: '[3]', resources: '', early_start: 85, early_finish: 265, late_start: 85, late_finish: 265, total_float: 0, free_float: 0, is_critical: 1, progress: 20, status: 'in_progress' },
+      { id: 6, project_id: 1, name: '景观广场施工', section: 'B区', duration: 45, start_date: '2026-08-23', end_date: '2026-10-06', predecessors: '[4]', resources: '', early_start: 175, early_finish: 220, late_start: 185, late_finish: 230, total_float: 10, free_float: 10, is_critical: 0, progress: 5, status: 'pending' }
+    ],
+    task_materials: [
+      { id: 1, task_id: 3, material_id: 1, quantity: 400 },
+      { id: 2, task_id: 3, material_id: 2, quantity: 180 },
+      { id: 3, task_id: 3, material_id: 3, quantity: 600 },
+      { id: 4, task_id: 3, material_id: 4, quantity: 350 },
+      { id: 5, task_id: 3, material_id: 5, quantity: 450 },
+      { id: 6, task_id: 4, material_id: 1, quantity: 500 },
+      { id: 7, task_id: 4, material_id: 2, quantity: 250 },
+      { id: 8, task_id: 4, material_id: 3, quantity: 800 },
+      { id: 9, task_id: 4, material_id: 4, quantity: 400 },
+      { id: 10, task_id: 4, material_id: 5, quantity: 500 },
+      { id: 11, task_id: 5, material_id: 1, quantity: 1200 },
+      { id: 12, task_id: 5, material_id: 2, quantity: 800 },
+      { id: 13, task_id: 5, material_id: 3, quantity: 2500 },
+      { id: 14, task_id: 5, material_id: 4, quantity: 1500 },
+      { id: 15, task_id: 5, material_id: 5, quantity: 2000 },
+      { id: 16, task_id: 6, material_id: 1, quantity: 150 },
+      { id: 17, task_id: 6, material_id: 4, quantity: 800 },
+      { id: 18, task_id: 6, material_id: 5, quantity: 600 }
+    ],
+    rectifications: (function() {
+      const d = (off) => { const dt = new Date(); dt.setDate(dt.getDate() + off); return dt.toISOString().slice(0,10) }
+      const dt = (off) => { const dt2 = new Date(); dt2.setDate(dt2.getDate() + off); return dt2.toISOString().slice(0,10) + ' 10:00:00' }
+      return [
+        { id: 1, inspection_id: 1, inspection_code: 'XJ-20260603-001', inspection_title: '基坑临边防护栏杆缺失', risk_level: 'high', requirement: '立即补装所有缺失的临边防护栏杆，并设置红白警示标识', responsible_person: '刘工头', deadline: d(-2), status: 'overdue', submit_measures: '', submit_description: '', submitter: '', submitted_at: '', verify_result: '', verify_opinion: '', supervisor: '', completed_at: '', upgraded: 0, timeline: '[]', created_at: '2026-06-03 10:00:00' },
+        { id: 2, inspection_id: 2, inspection_code: 'XJ-20260602-002', inspection_title: '脚手架连墙件设置不足', risk_level: 'high', requirement: '按JGJ130规范要求补设连墙件，两步三跨布置', responsible_person: '陈班长', deadline: d(0), status: 'pending', submit_measures: '', submit_description: '', submitter: '', submitted_at: '', verify_result: '', verify_opinion: '', supervisor: '', completed_at: '', upgraded: 0, timeline: '[]', created_at: '2026-06-02 14:20:00' },
+        { id: 3, inspection_id: 3, inspection_code: 'XJ-20260530-003', inspection_title: '2#塔吊力矩限制器失灵', risk_level: 'high', requirement: '立即停机检修，更换力矩限制器传感器并重新标定', responsible_person: '设备组王工', deadline: d(-4), status: 'overdue', submit_measures: '已联系厂家技术人员到场，正在更换传感器组件，预计明日完成', submit_description: '力矩限制器故障已排查，系传感器老化导致', submitter: '设备组王工', submitted_at: dt(-1), verify_result: '', verify_opinion: '', supervisor: '', completed_at: '', upgraded: 0, timeline: '[]', created_at: '2026-05-30 09:15:00' },
+        { id: 4, inspection_id: 4, inspection_code: 'XJ-20260601-004', inspection_title: '临时用电私拉乱接', risk_level: 'medium', requirement: '拆除违规接线，按TN-S系统重新规范布线，加装漏电保护器', responsible_person: '电工李师傅', deadline: d(-1), status: 'completed', submit_measures: '已拆除所有私拉乱接线路，按规范重新布设三级配电二级保护，所有开关箱均加装合格漏电保护器', submit_description: '整改完成，已组织现场电工培训', submitter: '电工李师傅', submitted_at: dt(-1), verify_result: 'pass', verify_opinion: '现场核查整改到位，线路规范，漏保测试合格，同意关闭', supervisor: '监理-张工', completed_at: dt(0), upgraded: 0, timeline: '[]', created_at: '2026-06-01 11:30:00' }
+      ]
+    })()
   }
 
   Object.keys(mockDb).forEach(k => {
@@ -299,7 +337,9 @@ function findFirstExistingTable(tables) {
     safety_inspection: 'safety_inspections',
     equipment_log: 'equipment_logs',
     construction_zone: 'construction_zones',
-    monthly_stat: 'monthly_stats'
+    monthly_stat: 'monthly_stats',
+    rectification: 'rectifications',
+    task_material: 'task_materials'
   }
   for (const t of tables) {
     if (mockDb[t] && Array.isArray(mockDb[t])) return t

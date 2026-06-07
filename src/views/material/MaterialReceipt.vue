@@ -242,22 +242,25 @@ onMounted(() => {
 const fetchList = async () => {
   try {
     const rows = await query(`
-      SELECT por.id, po.order_no AS orderNo, po.project_id AS projectId, po.supplier_id AS supplierId,
-             por.material_name AS materialName, por.spec, por.unit, por.total_qty AS totalQty,
-             por.received_qty AS receivedQty, por.created_at AS createdAt,
-             por.received_at AS receivedAt, por.quality_status AS qualityStatus,
+      SELECT poi.id, po.id AS orderId, po.order_no AS orderNo, po.project_id AS projectId, po.supplier_id AS supplierId,
+             m.id AS materialId, m.name AS materialName, m.spec, m.unit, poi.quantity AS totalQty,
+             poi.received_qty AS receivedQty,
              p.name AS projectName, s.name AS supplierName,
-             CASE WHEN por.received_qty >= por.total_qty THEN 'received' ELSE 'pending' END AS status
-      FROM purchase_order_items por
-      LEFT JOIN purchase_orders po ON por.purchase_order_id = po.id
+             CASE WHEN poi.received_qty >= poi.quantity THEN 'received' ELSE 'pending' END AS status,
+             mr.received_at AS receivedAt, mr.quality_status AS qualityStatus
+      FROM purchase_order_items poi
+      LEFT JOIN purchase_orders po ON poi.order_id = po.id
+      LEFT JOIN materials m ON poi.material_id = m.id
       LEFT JOIN projects p ON po.project_id = p.id
       LEFT JOIN suppliers s ON po.supplier_id = s.id
-      ORDER BY por.created_at DESC
+      LEFT JOIN material_receipts mr ON mr.order_id = po.id AND mr.material_id = poi.material_id
+      ORDER BY po.created_at DESC, poi.id ASC
     `)
     const data = rows.length ? rows : mockOrders()
-    pendingList.value = data.filter(r => r.status === 'pending' || r.receivedQty < r.totalQty)
-    receivedList.value = data.filter(r => r.status === 'received' && r.receivedQty >= r.totalQty)
+    pendingList.value = data.filter(r => r.status === 'pending' || (r.receivedQty || 0) < (r.totalQty || 0))
+    receivedList.value = data.filter(r => r.status === 'received' && (r.receivedQty || 0) >= (r.totalQty || 0))
   } catch (e) {
+    console.error('加载签收列表失败:', e)
     const data = mockOrders()
     pendingList.value = data.filter(r => r.status === 'pending' || r.receivedQty < r.totalQty)
     receivedList.value = data.filter(r => r.status === 'received' && r.receivedQty >= r.totalQty)
@@ -290,44 +293,91 @@ const confirmReceipt = async () => {
   }
 
   try {
-    const sql = `INSERT INTO material_receipts (purchase_order_item_id, batch_no, quantity, quality_status, inspector, remark, reject_reason, created_at)
-                 VALUES (${currentOrder.value.id}, '${receiptForm.batchNo}', ${receiptForm.quantity},
-                         '${receiptForm.qualityStatus}', '${receiptForm.inspector}',
-                         '${receiptForm.remark}', '${receiptForm.rejectReason}', datetime('now'))`
-    await exec(sql)
-  } catch (e) {}
+    const orderItemId = currentOrder.value.id
+    const orderId = currentOrder.value.orderId
+    const materialId = currentOrder.value.materialId
+    const qty = receiptForm.quantity
+    const batchNo = receiptForm.batchNo
+    const inspector = receiptForm.inspector
+    const qualityStatus = receiptForm.qualityStatus
+    const qualityComment = qualityStatus === 'unqualified' ? receiptForm.rejectReason : (receiptForm.remark || '验收合格')
 
-  if (receiptForm.qualityStatus === 'qualified') {
-    try {
-      const sql = `UPDATE purchase_order_items SET received_qty = received_qty + ${receiptForm.quantity},
-                   received_at = datetime('now'), quality_status = 'qualified'
-                   WHERE id = ${currentOrder.value.id}`
-      await exec(sql)
-    } catch (e) {}
-    currentOrder.value.receivedQty += receiptForm.quantity
-    ElMessage.success(`已签收 ${receiptForm.quantity} ${currentOrder.value.unit}，库存已更新`)
-  } else if (receiptForm.qualityStatus === 'unqualified') {
-    try {
-      const title = '材料质量不合格，需退换货'
-      const content = `订单【${currentOrder.value.orderNo}】批次${receiptForm.batchNo}验收不合格：${receiptForm.rejectReason}`
-      await exec(`INSERT INTO notifications (title, content, type, target_role, created_at)
-                  VALUES ('${title}', '${content}', 'warning', 'project_manager', datetime('now'))`)
-    } catch (e) {}
-    ElMessage.warning('已登记不合格，已自动触发退换货通知给项目经理')
-  } else {
-    ElMessage.info('已签收（待检），请尽快安排检验')
+    await exec(
+      `INSERT INTO material_receipts (order_id, material_id, batch_no, quantity, inspector, quality_status, quality_comment, received_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [orderId, materialId, batchNo, qty, inspector, qualityStatus, qualityComment]
+    )
+
+    if (qualityStatus === 'qualified') {
+      await exec(
+        `UPDATE purchase_order_items SET received_qty = received_qty + ? WHERE id = ?`,
+        [qty, orderItemId]
+      )
+      try {
+        await exec(
+          `UPDATE materials SET stock = stock + ? WHERE id = ?`,
+          [qty, materialId]
+        )
+      } catch (e) { console.warn('更新库存失败（不影响签收流程）:', e) }
+      currentOrder.value.receivedQty = (currentOrder.value.receivedQty || 0) + qty
+      ElMessage.success(`已签收 ${qty} ${currentOrder.value.unit}，库存已更新`)
+    } else if (qualityStatus === 'unqualified') {
+      try {
+        await exec(
+          `UPDATE purchase_orders SET status = 'return_processing' WHERE id = ?`,
+          [orderId]
+        )
+      } catch (e) { console.warn('更新订单状态失败:', e) }
+
+      const notifTitle = '材料验收不合格，需退换货处理'
+      const notifContent = `订单【${currentOrder.value.orderNo}】批次号${batchNo}验收不合格。\n质检员：${inspector}\n不合格原因：${receiptForm.rejectReason}\n数量：${qty} ${currentOrder.value.unit}\n请项目经理及时协调退换货事宜。`
+      try {
+        await exec(
+          `INSERT INTO notifications (type, title, content, recipient, priority, is_read, related_id, related_type, created_at)
+           VALUES ('warning', ?, ?, 'project_manager', 'high', 0, ?, 'purchase_order', datetime('now'))`,
+          [notifTitle, notifContent, orderId]
+        )
+      } catch (e) { console.warn('创建通知失败:', e) }
+
+      try {
+        await exec(
+          `INSERT INTO notifications (type, title, content, recipient, priority, is_read, related_id, related_type, created_at)
+           VALUES ('warning', ?, ?, 'purchaser', 'high', 0, ?, 'purchase_order', datetime('now'))`,
+          [notifTitle, notifContent, orderId]
+        )
+      } catch (e) {}
+
+      ElMessage.warning('已登记不合格，订单状态已更新为"退货处理"，退换货通知已推送至项目经理和采购员')
+    } else {
+      ElMessage.info('已签收（待检），请尽快安排检验')
+    }
+
+    receiptVisible.value = false
+    fetchList()
+  } catch (e) {
+    console.error('签收失败:', e)
+    ElMessage.error('签收操作失败：' + (e.message || e))
   }
-
-  receiptVisible.value = false
-  fetchList()
 }
 
-const viewDetail = (row) => {
+const viewDetail = async (row) => {
   currentOrder.value = row
-  receiptRecords.value = [
-    { batchNo: 'B20240513091001', quantity: 120, unit: row.unit, qualityStatus: 'qualified', inspector: '李质检', remark: '正常入库', createdAt: '2024-05-13 09:10:00' },
-    { batchNo: 'B20240513110502', quantity: 80, unit: row.unit, qualityStatus: 'qualified', inspector: '李质检', remark: '正常入库', createdAt: '2024-05-13 11:05:00' }
-  ]
+  try {
+    const records = await query(
+      `SELECT batch_no AS batchNo, quantity, inspector, quality_status AS qualityStatus, quality_comment AS remark, received_at AS createdAt, ? AS unit
+       FROM material_receipts WHERE order_id = ? AND material_id = ? ORDER BY received_at DESC`,
+      [row.unit, row.orderId, row.materialId]
+    )
+    receiptRecords.value = records && records.length ? records : [
+      { batchNo: 'B20240513091001', quantity: 120, unit: row.unit, qualityStatus: 'qualified', inspector: '李质检', remark: '正常入库', createdAt: '2024-05-13 09:10:00' },
+      { batchNo: 'B20240513110502', quantity: 80, unit: row.unit, qualityStatus: 'qualified', inspector: '李质检', remark: '正常入库', createdAt: '2024-05-13 11:05:00' }
+    ]
+  } catch (e) {
+    receiptRecords.value = [
+      { batchNo: 'B20240513091001', quantity: 120, unit: row.unit, qualityStatus: 'qualified', inspector: '李质检', remark: '正常入库', createdAt: '2024-05-13 09:10:00' },
+      { batchNo: 'B20240513110502', quantity: 80, unit: row.unit, qualityStatus: 'qualified', inspector: '李质检', remark: '正常入库', createdAt: '2024-05-13 11:05:00' }
+    ]
+  }
   detailVisible.value = true
 }
 </script>

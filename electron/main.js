@@ -327,6 +327,89 @@ function initSeedData() {
     equips.run('EQ-003', '3#挖掘机', '挖掘机', 'CAT336', projId, 'C区', 'standby', '2026-05-28', '2026-06-27', 30, '赵师傅')
     equips.run('EQ-004', '4#混凝土泵车', '泵车', 'SY5419', projId, 'A区', 'maintenance', '2026-03-15', '2026-06-05', 90, '孙师傅')
     equips.run('EQ-005', '5#施工升降机', '升降机', 'SC200', projId, 'B区', 'working', '2026-06-01', '2026-07-01', 30, '周师傅')
+    equips.run('EQ-006', '6#塔吊', '塔吊', 'QTZ63', projId, 'C区', 'fault', '2026-02-10', '2026-05-12', 90, '吴师傅')
+    equips.run('EQ-007', '7#挖掘机', '挖掘机', 'PC220', projId, 'A区', 'standby', '2026-05-25', '2026-06-24', 30, '郑师傅')
+
+    const tasks = db.prepare(`INSERT INTO construction_tasks (project_id, name, section, duration, start_date, end_date, predecessors, resources, early_start, early_finish, late_start, late_finish, total_float, free_float, is_critical, progress, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const t1 = tasks.run(projId, '土方开挖', 'A区', 20, '2026-03-01', '2026-03-20', '', '', 0, 20, 0, 20, 0, 0, 1, 100, 'completed').lastInsertRowid
+    const t2 = tasks.run(projId, '基础垫层', 'A区', 5, '2026-03-21', '2026-03-25', JSON.stringify([t1]), '', 20, 25, 20, 25, 0, 0, 1, 100, 'completed').lastInsertRowid
+    const t3 = tasks.run(projId, '地下结构施工', 'A区', 60, '2026-03-26', '2026-05-24', JSON.stringify([t2]), '', 25, 85, 25, 85, 0, 0, 1, 85, 'in_progress').lastInsertRowid
+    const t4 = tasks.run(projId, '裙楼主体结构', 'B区', 90, '2026-05-25', '2026-08-22', JSON.stringify([t3]), '', 85, 175, 90, 180, 5, 5, 0, 40, 'in_progress').lastInsertRowid
+    const t5 = tasks.run(projId, '主楼主体结构', 'A区', 180, '2026-05-25', '2026-11-20', JSON.stringify([t3]), '', 85, 265, 85, 265, 0, 0, 1, 20, 'in_progress').lastInsertRowid
+    const t6 = tasks.run(projId, '景观广场施工', 'B区', 45, '2026-08-23', '2026-10-06', JSON.stringify([t4]), '', 175, 220, 185, 230, 10, 10, 0, 5, 'pending').lastInsertRowid
+
+    const taskMat = db.prepare(`INSERT INTO task_materials (task_id, material_id, quantity) VALUES (?, ?, ?)`)
+    taskMat.run(t3, 1, 400)
+    taskMat.run(t3, 2, 180)
+    taskMat.run(t3, 3, 600)
+    taskMat.run(t3, 4, 350)
+    taskMat.run(t3, 5, 450)
+    taskMat.run(t4, 1, 500)
+    taskMat.run(t4, 2, 250)
+    taskMat.run(t4, 3, 800)
+    taskMat.run(t4, 4, 400)
+    taskMat.run(t4, 5, 500)
+    taskMat.run(t5, 1, 1200)
+    taskMat.run(t5, 2, 800)
+    taskMat.run(t5, 3, 2500)
+    taskMat.run(t5, 4, 1500)
+    taskMat.run(t5, 5, 2000)
+    taskMat.run(t6, 1, 150)
+    taskMat.run(t6, 4, 800)
+    taskMat.run(t6, 5, 600)
+
+    const poStmt = db.prepare(`INSERT INTO purchase_orders (order_no, project_id, supplier_id, total_amount, status, required_date, budget_ok, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const poiStmt = db.prepare(`INSERT INTO purchase_order_items (order_id, material_id, quantity, unit_price, amount, received_qty) VALUES (?, ?, ?, ?, ?, ?)`)
+
+    const po1 = poStmt.run('PO-20260601-001', projId, 1, 285600, 'in_transit', '2026-06-10', 1, '采购部-王经理', '2026-06-01 10:30:00').lastInsertRowid
+    poiStmt.run(po1, 1, 200, 480, 96000, 0)
+    poiStmt.run(po1, 4, 500, 95, 47500, 0)
+    poiStmt.run(po1, 5, 600, 85, 51000, 0)
+
+    const po2 = poStmt.run('PO-20260528-008', projId, 2, 378000, 'budget_review', '2026-06-15', 0, '采购部-李主管', '2026-05-28 15:20:00').lastInsertRowid
+    poiStmt.run(po2, 2, 90, 4200, 378000, 0)
+
+    const po3 = poStmt.run('PO-20260520-004', projId, 1, 428000, 'completed', '2026-05-25', 1, '采购部-王经理', '2026-05-20 14:05:00').lastInsertRowid
+    poiStmt.run(po3, 3, 800, 420, 336000, 800)
+    poiStmt.run(po3, 1, 200, 460, 92000, 200)
+
+    const receiptStmt = db.prepare(`INSERT INTO material_receipts (order_id, material_id, batch_no, quantity, inspector, quality_status, quality_comment, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    receiptStmt.run(po3, 3, 'B20260525-C30-001', 800, '质检-张工', 'qualified', '混凝土强度达标，配合比符合要求', '2026-05-25 09:10:00')
+    receiptStmt.run(po3, 1, 'B20260525-PO425-001', 200, '质检-张工', 'qualified', '水泥安定性检测合格，3d强度满足要求', '2026-05-25 14:30:00')
+
+    const siStmt = db.prepare(`INSERT INTO safety_inspections (project_id, area, risk_level, title, inspector, inspect_date, result, rectification_required, responsible_person, deadline, rectification_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const si1 = siStmt.run(projId, 'A区-基坑', 'high', '基坑临边防护栏杆缺失', '安全-赵监督员', '2026-06-03', 'abnormal', 1, '刘工头', '2026-06-05', 'pending').lastInsertRowid
+    const si2 = siStmt.run(projId, 'B区-脚手架', 'high', '脚手架连墙件设置不足', '安全-钱监督员', '2026-06-02', 'abnormal', 1, '陈班长', '2026-06-06', 'pending').lastInsertRowid
+    const si3 = siStmt.run(projId, 'A区-塔吊', 'high', '2#塔吊力矩限制器失灵', '安全-孙监督员', '2026-05-30', 'abnormal', 1, '设备组王工', '2026-06-03', 'pending').lastInsertRowid
+    const si4 = siStmt.run(projId, 'C区-用电', 'medium', '临时用电私拉乱接', '安全-周监督员', '2026-06-01', 'abnormal', 1, '电工李师傅', '2026-06-04', 'completed').lastInsertRowid
+    const si5 = siStmt.run(projId, '材料堆放区', 'medium', '消防通道被材料占用', '安全-吴监督员', '2026-06-04', 'normal', 0, '', '', 'none').lastInsertRowid
+
+    const rectStmt = db.prepare(`INSERT INTO rectifications (inspection_id, inspection_code, inspection_title, risk_level, requirement, responsible_person, deadline, status, submit_measures, submit_description, submitter, submitted_at, verify_result, verify_opinion, supervisor, completed_at, upgraded, timeline, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const daysAgo = (d) => {
+      const dt = new Date()
+      dt.setDate(dt.getDate() + d)
+      return dt.toISOString().slice(0, 10)
+    }
+    rectStmt.run(si1, 'XJ-20260603-001', '基坑临边防护栏杆缺失', 'high', '立即补装所有缺失的临边防护栏杆，并设置红白警示标识', '刘工头', daysAgo(-2), 'overdue', '', '', '', '', '', '', '', '', 0, '[]', '2026-06-03 10:00:00')
+    rectStmt.run(si2, 'XJ-20260602-002', '脚手架连墙件设置不足', 'high', '按JGJ130规范要求补设连墙件，两步三跨布置', '陈班长', daysAgo(0), 'pending', '', '', '', '', '', '', '', '', 0, '[]', '2026-06-02 14:20:00')
+    rectStmt.run(si3, 'XJ-20260530-003', '2#塔吊力矩限制器失灵', 'high', '立即停机检修，更换力矩限制器传感器并重新标定', '设备组王工', daysAgo(-4), 'overdue', '已联系厂家技术人员到场，正在更换传感器组件，预计明日完成', '力矩限制器故障已排查，系传感器老化导致', '设备组王工', daysAgo(-1).replace(/^/,'') + ' 09:30:00', '', '', '', '', 0, '[]', '2026-05-30 09:15:00')
+    rectStmt.run(si4, 'XJ-20260601-004', '临时用电私拉乱接', 'medium', '拆除违规接线，按TN-S系统重新规范布线，加装漏电保护器', '电工李师傅', daysAgo(-1), 'completed', '已拆除所有私拉乱接线路，按规范重新布设三级配电二级保护，所有开关箱均加装合格漏电保护器', '整改完成，已组织现场电工培训', '电工李师傅', daysAgo(-1).replace(/^/,'') + ' 16:00:00', 'pass', '现场核查整改到位，线路规范，漏保测试合格，同意关闭', '监理-张工', daysAgo(0).replace(/^/,'') + ' 10:00:00', 0, '[]', '2026-06-01 11:30:00')
+
+    const notifStmt = db.prepare(`INSERT INTO notifications (type, title, content, recipient, priority, is_read, related_id, related_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    notifStmt.run('info', '采购订单待预算审核', '订单【PO-20260528-008】已提交预算审核，请造价工程师及时处理', 'cost_engineer', 'normal', 0, po2, 'purchase_order', '2026-05-28 15:25:00')
+    notifStmt.run('warning', '设备维保预警', '4#混凝土泵车已超期2天未维保，请尽快安排', 'equipment_manager', 'high', 0, 4, 'equipment', '2026-06-07 08:00:00')
+    notifStmt.run('warning', '设备维保预警', '6#塔吊已超期26天未维保，请立即停机', 'equipment_manager', 'high', 0, 6, 'equipment', '2026-06-07 08:00:00')
+    notifStmt.run('info', '采购订单已发货', '订单【PO-20260601-001】供应商已确认发货', 'warehouse', 'normal', 0, po1, 'purchase_order', '2026-06-03 16:00:00')
+    notifStmt.run('success', '安全整改完成', '【临时用电私拉乱接】整改已通过监理验证并关闭', 'safety_officer', 'normal', 1, si4, 'inspection', '2026-06-06 10:10:00')
+
+    const msStmt = db.prepare(`INSERT INTO monthly_stats (project_id, section, year, month, completed_value, planned_value, actual_cost, quality_pass_rate, safety_incidents, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    msStmt.run(projId, 'A区', 2026, 3, 12500000, 12000000, 11800000, 98.5, 0, '2026-04-01 00:00:00')
+    msStmt.run(projId, 'B区', 2026, 3, 8200000, 8000000, 8100000, 99.2, 0, '2026-04-01 00:00:00')
+    msStmt.run(projId, 'A区', 2026, 4, 18500000, 18000000, 19200000, 97.8, 1, '2026-05-01 00:00:00')
+    msStmt.run(projId, 'B区', 2026, 4, 12000000, 12500000, 11800000, 98.1, 0, '2026-05-01 00:00:00')
+    msStmt.run(projId, 'A区', 2026, 5, 22000000, 21500000, 22800000, 97.5, 1, '2026-06-01 00:00:00')
+    msStmt.run(projId, 'B区', 2026, 5, 15000000, 15500000, 14800000, 98.8, 0, '2026-06-01 00:00:00')
+    msStmt.run(projId, 'C区', 2026, 5, 3500000, 4000000, 3600000, 99.5, 0, '2026-06-01 00:00:00')
   }
 }
 
