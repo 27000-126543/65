@@ -240,6 +240,39 @@ function initTables() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (project_id) REFERENCES projects(id)
     );
+
+    CREATE TABLE IF NOT EXISTS rectifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inspection_id INTEGER,
+      inspection_code TEXT,
+      inspection_title TEXT,
+      risk_level TEXT,
+      requirement TEXT,
+      responsible_person TEXT,
+      deadline TEXT,
+      status TEXT DEFAULT 'pending',
+      submit_measures TEXT,
+      submit_description TEXT,
+      submitter TEXT,
+      submitted_at TEXT,
+      verify_result TEXT,
+      verify_opinion TEXT,
+      supervisor TEXT,
+      completed_at TEXT,
+      upgraded INTEGER DEFAULT 0,
+      timeline TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (inspection_id) REFERENCES safety_inspections(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS task_materials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      material_id INTEGER NOT NULL,
+      quantity REAL NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES construction_tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY (material_id) REFERENCES materials(id)
+    );
   `)
 }
 

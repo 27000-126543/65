@@ -111,15 +111,15 @@
           <div class="equip-list">
             <div class="equip-item">
               <div class="equip-name">运行中</div>
-              <div class="equip-count equip-running">{{ equipmentStats.running }}</div>
+              <div class="equip-count equip-running">{{ equipmentStats.working }}</div>
             </div>
             <div class="equip-item">
               <div class="equip-name">待机</div>
-              <div class="equip-count equip-idle">{{ equipmentStats.idle }}</div>
+              <div class="equip-count equip-idle">{{ equipmentStats.standby }}</div>
             </div>
             <div class="equip-item">
               <div class="equip-name">维修中</div>
-              <div class="equip-count equip-repair">{{ equipmentStats.repair }}</div>
+              <div class="equip-count equip-repair">{{ equipmentStats.maintenance }}</div>
             </div>
             <div class="equip-item">
               <div class="equip-name">故障</div>
@@ -151,7 +151,7 @@ const stats = reactive({
 })
 const projectList = ref([])
 const noticeList = ref([])
-const equipmentStats = reactive({ running: 0, idle: 0, repair: 0, fault: 0 })
+const equipmentStats = reactive({ working: 0, standby: 0, maintenance: 0, fault: 0 })
 
 const pieChartRef = ref(null)
 const barChartRef = ref(null)
@@ -195,15 +195,19 @@ const loadNotices = async () => {
 
 const loadEquipment = async () => {
   try {
-    const rows = await query("SELECT status, COUNT(*) as cnt FROM equipments GROUP BY status")
-    rows.forEach(r => {
-      if (r.status === 'running') equipmentStats.running = r.cnt
-      else if (r.status === 'idle') equipmentStats.idle = r.cnt
-      else if (r.status === 'repair') equipmentStats.repair = r.cnt
-      else if (r.status === 'fault') equipmentStats.fault = r.cnt
-    })
+    const rows = await query("SELECT status, COUNT(*) as cnt FROM equipment GROUP BY status")
+    const countMap = {}
+    rows.forEach(r => { countMap[r.status] = r.cnt })
+    equipmentStats.working = countMap.working || 0
+    equipmentStats.standby = countMap.standby || 0
+    equipmentStats.maintenance = countMap.maintenance || 0
+    equipmentStats.fault = countMap.fault || 0
   } catch (e) {
-    console.error(e)
+    console.error('加载设备状态失败:', e)
+    equipmentStats.working = 0
+    equipmentStats.standby = 0
+    equipmentStats.maintenance = 0
+    equipmentStats.fault = 0
   }
 }
 
