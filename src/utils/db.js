@@ -1,6 +1,35 @@
 import dayjs from 'dayjs'
 
 const isElectron = typeof window !== 'undefined' && !!window.electronAPI
+const HTTP_BASE = 'http://localhost:3099'
+
+let httpAvailable = null
+async function checkHttp() {
+  if (httpAvailable !== null) return httpAvailable
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 1500)
+    const r = await fetch(HTTP_BASE + '/health', { signal: ctrl.signal })
+    clearTimeout(t)
+    httpAvailable = r.ok
+  } catch (e) {
+    httpAvailable = false
+  }
+  return httpAvailable
+}
+
+async function httpCall(endpoint, sql, params) {
+  try {
+    const r = await fetch(HTTP_BASE + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params })
+    })
+    return await r.json()
+  } catch (e) {
+    return { ok: 0, error: e.message }
+  }
+}
 
 let mockDb = null
 
@@ -600,10 +629,14 @@ async function query(sql, params = []) {
         }
         return res.data
       } catch (electronErr) {
-        console.warn('[query] electron query failed, fallback to mock:', electronErr && electronErr.message)
-        initMockDb()
-        return smartFallback(sql).data
+        console.warn('[query] electron query failed, fallback:', electronErr && electronErr.message)
       }
+    }
+    const httpOk = await checkHttp()
+    if (httpOk) {
+      const res = await httpCall('/db/query', sql, params)
+      if (res && res.ok) return res.data
+      console.warn('[query] http failed, fallback to mock:', res && res.error)
     }
     const res = mockQuery(sql, params)
     return res && res.data ? res.data : []
@@ -619,31 +652,51 @@ async function query(sql, params = []) {
 }
 
 async function exec(sql, params = []) {
-  if (isElectron) {
-    const res = await window.electronAPI.exec(sql, params)
-    if (!res.success) {
-      console.error('SQL Error:', res.error)
-      throw new Error(res.error)
+  try {
+    if (isElectron) {
+      const res = await window.electronAPI.exec(sql, params)
+      if (res && res.success) return true
+      console.warn('[exec] electron failed, fallback:', res && res.error)
     }
+    const httpOk = await checkHttp()
+    if (httpOk) {
+      const res = await httpCall('/db/exec', sql, params)
+      if (res && res.ok) return true
+      console.warn('[exec] http failed, fallback to mock:', res && res.error)
+    }
+    mockQuery(sql, params)
+    return true
+  } catch (e) {
+    console.warn('[exec] catch error, fallback:', e && e.message)
+    mockQuery(sql, params)
     return true
   }
-  mockQuery(sql, params)
-  return true
 }
 
 async function transaction(statements) {
-  if (isElectron) {
-    const res = await window.electronAPI.transaction(statements)
-    if (!res.success) {
-      console.error('Transaction Error:', res.error)
-      throw new Error(res.error)
+  try {
+    if (isElectron) {
+      const res = await window.electronAPI.transaction(statements)
+      if (res && res.success) return true
+      console.warn('[transaction] electron failed, fallback:', res && res.error)
+    }
+    const httpOk = await checkHttp()
+    if (httpOk) {
+      const res = await httpCall('/db/transaction', '', statements)
+      if (res && res.ok) return true
+      console.warn('[transaction] http failed, fallback to mock:', res && res.error)
+    }
+    for (const { sql, params } of statements) {
+      mockQuery(sql, params || [])
+    }
+    return true
+  } catch (e) {
+    console.warn('[transaction] catch error, fallback:', e && e.message)
+    for (const { sql, params } of (statements || [])) {
+      mockQuery(sql, params || [])
     }
     return true
   }
-  for (const { sql, params } of statements) {
-    mockQuery(sql, params || [])
-  }
-  return true
 }
 
 async function showSaveDialog(options) {

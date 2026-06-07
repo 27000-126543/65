@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
-    "better-sqlite3": "^9.4.3",
+    "better-sqlite3": "^12.10.0",
     "dayjs": "^1.11.10",
     "echarts": "^5.5.0",
     "element-plus": "^2.5.6",
